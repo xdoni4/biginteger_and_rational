@@ -7,6 +7,11 @@ static const int RADIX = 1 << 15;
 std::string& reverse(std::string& s);
 
 class BigInteger;
+class Rational;
+
+BigInteger operator*(const BigInteger &a, const BigInteger &b);
+std::ostream& operator<<(std::ostream &out, const BigInteger &a);
+std::ostream& operator<<(std::ostream &out, const Rational &a);
 bool operator==(const BigInteger &a, const BigInteger &b);
 bool operator>(const BigInteger &a, const BigInteger &b);
 bool operator<(const BigInteger &a, const BigInteger &b);
@@ -35,6 +40,20 @@ public:
             index++;
         }
     } 
+
+    BigInteger(std::string s) {
+        bool keepsign = s[0] == '-' ? 1 : 0;
+        if (keepsign) {
+            s.erase(0, 1);
+        }
+        sign = keepsign;
+        BigInteger tmp = 1;
+        for (size_t i = 0; i < s.size(); i++) {
+            (*this) += tmp * (s[s.size() - i - 1] - '0'); 
+            tmp *= 10;
+        }
+        sign = keepsign;
+    }
 
     BigInteger(const BigInteger &b) {
         sign = b.sign;
@@ -71,12 +90,13 @@ public:
             if (this->is_zero()) sign = 0;
             return (*this);
         }
-        if (body.size() < b.body.size()) {
-            body.resize(b.body.size());
+        BigInteger bcp = b;
+        if (body.size() < bcp.body.size()) {
+            body.resize(bcp.body.size());
         }
         int carry = 0;
-        for (size_t i = 0; i < b.body.size(); i++) {
-            int sum = body[i] + b.body[i] + carry;
+        for (size_t i = 0; i < bcp.body.size(); i++) {
+            int sum = body[i] + bcp.body[i] + carry;
             body[i] = sum % RADIX;
             carry = sum / RADIX;
         }
@@ -84,8 +104,8 @@ public:
             body.resize(body.size() + 1);
             int index = 0;
             while (carry) {
-                int sum = body[b.body.size() + index] + carry;
-                body[b.body.size() + index] = sum % RADIX;
+                int sum = body[bcp.body.size() + index] + carry;
+                body[bcp.body.size() + index] = sum % RADIX;
                 carry = sum / RADIX;
                 index++;
             }
@@ -99,7 +119,7 @@ public:
     }
 
     BigInteger& operator-=(const BigInteger &b) {
-        if (sign ^ b.sign == 0) { 
+        if ((sign ^ b.sign) == 0) { 
             BigInteger a_abs = (*this); a_abs.abs();
             BigInteger b_abs = b; b_abs.abs(); 
             if ((a_abs == b_abs)) {
@@ -174,11 +194,15 @@ public:
         a_abs += b_abs;
         (*this) = a_abs;
         sign = keepsign;
-        return (*this); 
+        return (*this);  
     }
 
     BigInteger& operator*=(const BigInteger &b) {
-        BigInteger res;
+        if (b == 0 || this->is_zero()) {
+            (*this) = 0;
+            return (*this);
+        }
+        BigInteger res;  
         int keepsign = sign ^ b.sign;
         for (size_t i = 0; i < b.body.size(); i++) {
             BigInteger tmp((*this));
@@ -187,6 +211,11 @@ public:
             res += tmp; 
         }
         (*this) = res; 
+        int diff = 0;
+        while (body[body.size() - diff - 1] == 0 && body.size() - diff > 1) {
+            diff++;
+        }
+        body.resize(body.size() - diff);
         sign = keepsign;
         return (*this);
     }
@@ -198,8 +227,8 @@ public:
     }
 
     BigInteger& operator%=(const BigInteger &divider) {
-        BigInteger rem;
-        (*this).div(divider, rem);
+        BigInteger rem, divcp = divider;
+        (*this).div(divcp, rem);
         (*this) = rem;
         return (*this);
     }
@@ -226,16 +255,21 @@ public:
         return tmp;
     }
 
-    operator bool() {
+    explicit operator bool() {
         return this->is_zero() ? false : true; 
     }
 
     int BigIntegerNeg() {
-        sign ^= 1;
+        if (!this->is_zero()) sign ^= 1;
         return 0;
     }
 
+    bool BigIntegerSign() {
+        return sign;
+    }
+
     int BigIntegerCompare(const BigInteger &b) const {
+        if (this->is_zero() && b.is_zero()) return 0;
         if (sign ^ b.sign) {
             if (sign) {
                 return -1;
@@ -305,17 +339,18 @@ public:
         return 0;
     }
 
-private:
-    bool sign;
-    std::vector <int> body;
-
-    bool is_zero() const {
-        return body.size() == 1 && body[0] == 0 ? true : false;
-    } 
     int abs() {
         sign = 0;
         return 0;
     }
+
+    bool is_zero() const {
+        return body.size() == 1 && body[0] == 0;
+    }
+
+private:
+    bool sign;
+    std::vector <int> body;  
     
     int shift_left(size_t k) {
         if (k == 0) return 0;
@@ -354,6 +389,7 @@ private:
     }
 
     int mul_short(int mult) {
+        if (this->is_zero()) (*this) = 0;
         sign ^= -(mult >> 31);
         mult = mult < 0 ? -mult : mult;
         int carry = 0;
@@ -370,6 +406,7 @@ private:
     }
 
     int div_short(int div, int &rem) {
+        if (this->is_zero()) (*this) = 0;
         sign ^= -(div >> 31);
         div = div < 0 ? -div : div;
         if (body.size() == 1) {
@@ -400,10 +437,11 @@ private:
     }
     
     int div(const BigInteger &diver, BigInteger &rem) {
+        if (this->is_zero()) (*this) = 0;
         BigInteger cur, res, acopy = (*this);
         int sign_a = sign, sign_div = diver.sign;
         BigInteger divider = diver; divider.abs();
-        int len = body.size();
+        size_t len = body.size();
         while (cur < divider && cur.body.size() < body.size()) { 
             if (!cur.is_zero()) cur.shift_left(1); 
             cur.body[0] = body[len - 1];
@@ -435,7 +473,7 @@ private:
         while (this->body[this->body.size() - diff - 1] == 0 && this->body.size() - diff > 1) {
             diff++;
         } 
-        this->body.resize(this->body.size() - diff); 
+        this->body.resize(this->body.size() - diff);  
         sign = sign_a ^ sign_div;
         BigInteger p = diver;
         p *= (*this);
@@ -512,9 +550,9 @@ bool operator>=(const BigInteger &a, const BigInteger &b) {
 }
 
 std::istream& operator>>(std::istream &in, BigInteger &a) {
-    int x;
-    in >> x;
-    a = x;
+    std::string s;
+    in >> s;
+    a = BigInteger(s);
     return in;
 }
 
@@ -531,4 +569,220 @@ std::string& reverse(std::string &s) {
     return s;
 }
 
+class Rational {
+public:
+    Rational() {
+        numerator = 0;
+        denominator = 1;
+    }
+    
+    Rational(const BigInteger &a, const BigInteger &b) {
+        numerator = a;
+        denominator = b;
+        if (denominator < 0) {
+            numerator.BigIntegerNeg();
+            denominator.BigIntegerNeg();
+        }
+        (*this).reduce();
+    }
 
+    Rational(const BigInteger &a) {
+        numerator = a;
+        denominator = 1;
+    }
+
+    Rational(int a) {
+        numerator = a;
+        denominator = 1;
+    }
+
+    Rational(const Rational &b) {
+        numerator = b.numerator;
+        denominator = b.denominator;
+    }
+
+    Rational& operator=(const Rational &b) {
+        numerator = b.numerator;
+        denominator = b.denominator;
+        return (*this);
+    }
+
+    Rational& operator+=(const Rational &b) {
+        numerator = numerator * b.denominator + b.numerator * denominator;
+        denominator *= b.denominator;
+        (*this).reduce();
+        return (*this);
+    }
+
+    Rational& operator-=(const Rational &b) {
+        numerator = numerator * b.denominator - b.numerator * denominator;
+        denominator *= b.denominator;
+        (*this).reduce();
+        return (*this);
+    }
+
+    Rational& operator*=(const Rational &b) {
+        numerator *= b.numerator;
+        denominator *= b.denominator;
+        (*this).reduce();
+        return (*this);
+    }
+
+    Rational& operator/=(const Rational &b) {
+        numerator *= b.denominator;
+        denominator *= b.numerator;
+        if (denominator < 0) {
+            numerator.BigIntegerNeg();
+            denominator.BigIntegerNeg();
+        }
+        (*this).reduce();
+        return (*this); 
+    }
+
+    std::string toString() const { 
+        std::string s_numer = numerator.toString();
+        if (denominator == 1 || numerator == 0) return s_numer;
+        std::string ret; 
+        std::string s_denom = denominator.toString();
+        ret += s_numer;
+        ret += '/';
+        ret += s_denom;
+        return ret;
+    }
+
+    int RationalNeg() {
+        numerator.BigIntegerNeg();
+        return 0;
+    }
+
+    std::string asDecimal(size_t precision=0) {
+        bool keepsign = numerator.BigIntegerSign();
+        BigInteger numer = numerator;
+        numer.abs();
+        if (numer == 0) {
+            std::string s = numer.toString();
+            if (precision != 0) {
+                s += '.'; 
+                std::string fill(precision, '0');
+                s += fill;
+            }
+            return s;
+        }
+        BigInteger ten_pwr = 1;
+        for (size_t i = 0; i <= precision; i++) {
+            ten_pwr *= 10;
+        }
+        numer *= ten_pwr;
+        numer /= denominator;
+        BigInteger last_digit = numer % 10;
+        numer /= 10;
+        if (last_digit >= 5) numer++;
+        std::string s = numer.toString();
+        if (s.size() < precision) {
+            std::string fill(precision - s.size(), '0');
+            s = fill + s;
+        }
+        s.insert(s.size() - precision, ".");
+        if (s[s.size() - 1] == '.') s.pop_back();
+        else if (s[0] == '.') s = '0' + s; 
+        if (keepsign && s != "0") s = '-' + s;
+        return s;
+    }
+
+    explicit operator double() {
+        std::string asdec = this->asDecimal(30);
+        double ret = std::stod(asdec);
+        return ret;
+    }
+
+    friend bool operator==(const Rational &a, const Rational &b);
+    friend bool operator!=(const Rational &a, const Rational &b); 
+    friend bool operator>(const Rational &a, const Rational &b);
+    friend bool operator<(const Rational &a, const Rational &b);
+    friend bool operator>=(const Rational &a, const Rational &b);
+    friend bool operator<=(const Rational &a, const Rational &b);
+private:
+    BigInteger numerator;
+    BigInteger denominator;
+
+    int reduce() {
+        // if (numerator == 0) return 0;
+        BigInteger numercp = numerator, denomcp = denominator;
+        numercp.abs(), denomcp.abs();
+        while (denomcp > 0) {
+            BigInteger tmp = numercp;
+            numercp = denomcp;
+            denomcp = tmp % denomcp;
+        }
+        numerator /= numercp;
+        denominator /= numercp;
+        return 0;
+    }
+};
+
+Rational operator+(const Rational &a, const Rational &b) {
+    Rational ret = a;
+    ret += b;
+    return ret;
+}
+
+Rational operator-(const Rational &a, const Rational &b) {
+    Rational ret = a;
+    ret -= b;
+    return ret;
+}
+
+Rational operator*(const Rational &a, const Rational &b) {
+    Rational ret = a;
+    ret *= b;
+    return ret;
+}
+
+Rational operator/(const Rational &a, const Rational &b) {
+    Rational ret = a;
+    ret /= b;
+    return ret;
+}
+
+Rational operator-(const Rational &a) {
+    Rational ret = a;
+    ret.RationalNeg();
+    return ret;
+}
+
+bool operator==(const Rational &a, const Rational &b) {
+    return (a.numerator == b.numerator && a.denominator == b.denominator);
+}
+
+bool operator!=(const Rational &a, const Rational &b) {
+    return (a.numerator != b.numerator || a.denominator != b.denominator);
+}
+
+bool operator<(const Rational &a, const Rational &b) {
+    return (a.numerator * b.denominator < b.numerator * a.denominator);
+}
+
+bool operator>(const Rational &a, const Rational &b) {
+    return (a.numerator * b.denominator > b.numerator * a.denominator);
+}
+
+bool operator<=(const Rational &a, const Rational &b) {
+    return (a.numerator * b.denominator <= b.numerator * a.denominator);
+}
+
+bool operator>=(const Rational &a, const Rational &b) {
+    return (a.numerator * b.denominator >= b.numerator * a.denominator);
+}
+
+std::istream& operator>>(std::istream &in, Rational &a) {
+    BigInteger n, d;
+    in >> n >> d;
+    a = Rational(n, d);
+    return in;
+}
+
+std::ostream& operator<<(std::ostream &out, const Rational &a) {
+    std::string s = a.toString();
+    out << s;
+    return out;
+}
